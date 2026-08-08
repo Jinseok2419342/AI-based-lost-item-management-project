@@ -149,13 +149,12 @@ def main() -> int:
             r = requests.patch(f"{BASE}/api/items/{item_id}",
                                json={"deadline": yesterday}, timeout=2)
             check("기한 수정 API", r.status_code == 200)
-            requests.post(f"{BASE}/api/scheduler/run-now", timeout=10)
+            rr = requests.post(f"{BASE}/api/scheduler/run-now", timeout=10).json()
+            check("스케줄러 수동 실행", "checked_at" in rr and rr.get("email_ready") is False)
+            st2 = requests.get(f"{BASE}/api/stats", timeout=2).json()
+            check("기한 경과 물품 집계", st2["expired"] >= 1, f"expired={st2['expired']}")
             item = requests.get(f"{BASE}/api/items/{item_id}", timeout=2).json()
-            check("기한 경과 감지(메일 시도 기록)", item["expire_sent"] == 1)
-            evs = requests.get(f"{BASE}/api/events", timeout=2).json()["events"]
-            mail_evs = [e for e in evs if e["type"] in ("email_sent", "email_failed")]
-            check("폐기 알림 이벤트 기록", len(mail_evs) >= 1,
-                  mail_evs[0]["message"][:60] if mail_evs else "")
+            check("메일 미설정 시 알림 보류(플래그 미소모)", item["expire_sent"] == 0)
 
         r = requests.get(f"{BASE}/", timeout=2)
         check("관리자 웹 페이지", r.status_code == 200 and "분실물" in r.text)

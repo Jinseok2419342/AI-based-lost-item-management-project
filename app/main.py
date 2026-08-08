@@ -55,6 +55,7 @@ def build_app() -> FastAPI:
         watcher.stop()
         camera.stop()
         scheduler.stop()
+        items.shutdown()
         log.info("시스템 종료")
 
     app = FastAPI(title="분실물 감지 AI 시스템", lifespan=lifespan)

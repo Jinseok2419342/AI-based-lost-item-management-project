@@ -75,7 +75,8 @@ function ddayOf(item) {
   today.setHours(0, 0, 0, 0);
   return Math.round((end - today) / 86400000);
 }
-function ddayBadge(item, warnDays = 3) {
+function ddayBadge(item) {
+  const warnDays = state.status?.warn_before_days ?? 3;
   const d = ddayOf(item);
   if (d < 0) return `<span class="badge badge-dday over">기한 지남</span>`;
   if (d === 0) return `<span class="badge badge-dday over">D-DAY</span>`;
@@ -109,9 +110,19 @@ $$(".nav-item").forEach((b) => b.addEventListener("click", () => goto(b.dataset.
 $$("[data-goto]").forEach((b) => b.addEventListener("click", () => goto(b.dataset.goto)));
 
 /* ── 상태 폴링 ────────────────────────────────────── */
+let serverDown = false;
+function reloadStream() {
+  $("#liveStream").src = `/api/stream?t=${Date.now()}`;
+}
+$("#liveStream").addEventListener("error", () => setTimeout(reloadStream, 3000));
+
 async function pollStatus() {
   try {
     const s = await api("/api/status");
+    if (serverDown) {
+      serverDown = false;
+      reloadStream(); // 서버가 살아나면 멈춘 MJPEG 스트림 재연결
+    }
     state.status = s;
     const pill = $("#statePill");
     const key = s.paused ? "paused" : s.state;
@@ -134,6 +145,7 @@ async function pollStatus() {
     }
     renderOverlay(s);
   } catch {
+    serverDown = true;
     $("#systemDot").className = "dot err";
     $("#systemLabel").textContent = "서버 연결 끊김";
   }
@@ -337,13 +349,18 @@ $$("#m_category .seg-btn").forEach((b) =>
 $("#m_save").addEventListener("click", async () => {
   const item = state.modalItem;
   if (!item) return;
-  const body = {
-    name: $("#m_name").value,
-    description: $("#m_description").value,
-  };
+  // 실제로 바꾼 값만 전송 — AI 분석이 끝나기 전 저장해도 다른 필드를 덮어쓰지 않음
+  const body = {};
+  if ($("#m_name").value.trim() !== item.name) body.name = $("#m_name").value;
+  if ($("#m_description").value.trim() !== (item.description || ""))
+    body.description = $("#m_description").value;
   if (state.modalCategory !== item.category) body.category = state.modalCategory;
   const d = $("#m_deadline").value;
   if (d && d !== String(item.deadline).slice(0, 10)) body.deadline = d;
+  if (!Object.keys(body).length) {
+    closeModal();
+    return;
+  }
   try {
     await api(`/api/items/${item.id}`, { method: "PATCH", body: JSON.stringify(body) });
     toast("저장되었습니다.", "ok");

@@ -81,9 +81,9 @@ def create_router(
         if body.category is not None and not items.set_category(item_id, body.category):
             raise HTTPException(400, "잘못된 분류 값입니다.")
         fields: dict = {}
-        if body.name is not None:
+        if body.name is not None and body.name.strip() != item["name"]:
             fields["name"] = body.name.strip()[:80] or "미확인 물품"
-        if body.description is not None:
+        if body.description is not None and body.description.strip() != item["description"]:
             fields["description"] = body.description.strip()[:300]
         if body.deadline is not None:
             d = body.deadline.strip()
@@ -100,6 +100,9 @@ def create_router(
             db.add_event("deadline_changed",
                          f"'{item['name']}' (#{item_id}) 폐기 기한을 {d}(으)로 변경했습니다.", item_id)
         if fields:
+            # 관리자가 직접 수정한 아이템에는 늦게 도착한 AI 결과를 덮어쓰지 않는다
+            if item["ai_status"] == "pending" and ("name" in fields or "deadline" in fields):
+                fields["ai_status"] = "done"
             db.update_item(item_id, **fields)
         return db.get_item(item_id)
 
@@ -157,6 +160,7 @@ def create_router(
             config.get("smtp_user") and config.get("smtp_password") and config.get("admin_email")
         )
         s["scheduler_last_run"] = scheduler.last_run
+        s["warn_before_days"] = config.get_int("warn_before_days")
         s["server_time"] = datetime.now().isoformat(timespec="seconds")
         return s
 
@@ -165,16 +169,18 @@ def create_router(
     async def stream():
         boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
+        def encode() -> bytes:
+            frame, _ = camera.latest()
+            if frame is None or not camera.connected:
+                return b""
+            ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            return jpeg.tobytes() if ok else b""
+
         async def gen():
             no_cam = _no_camera_jpeg()
             while True:
-                frame, _ = camera.latest()
-                if frame is None:
-                    data = no_cam
-                else:
-                    ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-                    data = jpeg.tobytes() if ok else no_cam
-                yield boundary + data + b"\r\n"
+                data = await asyncio.to_thread(encode)  # 인코딩이 이벤트 루프를 막지 않게
+                yield boundary + (data or no_cam) + b"\r\n"
                 await asyncio.sleep(0.12)
 
         return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
@@ -182,7 +188,7 @@ def create_router(
     @r.get("/snapshot")
     def snapshot():
         frame, _ = camera.latest()
-        if frame is None:
+        if frame is None or not camera.connected:
             data = _no_camera_jpeg()
         else:
             _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
@@ -214,8 +220,11 @@ def create_router(
         for key in SECRET_KEYS:
             if key in values and values[key].startswith("********"):
                 values.pop(key)
+        old_source = config.get("camera_source")
         config.set_many(values)
-        if "camera_source" in values:
+        # 실제로 소스가 바뀐 경우에만 재연결·기준 초기화 (무관한 설정 저장이
+        # 진행 중인 감지 사이클을 끊지 않도록)
+        if config.get("camera_source") != old_source:
             camera.set_source(config.get("camera_source"))
             watcher.rebaseline()
         db.add_event("settings_changed", "관리자가 설정을 변경했습니다.")

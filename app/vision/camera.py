@@ -17,6 +17,14 @@ log = logging.getLogger("camera")
 
 PROC_WIDTH = 960
 
+_LIVE_PREFIXES = ("rtsp://", "rtsps://", "http://", "https://", "/dev/")
+
+
+def _source_is_file(source: str) -> bool:
+    """파일(반복 재생·FPS 페이싱 대상)인지, 라이브 소스인지 구분."""
+    s = source.strip()
+    return not (s.isdigit() or s.lower().startswith(_LIVE_PREFIXES))
+
 
 class Camera:
     def __init__(self, source: str) -> None:
@@ -28,7 +36,7 @@ class Camera:
         self._connected = False
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._is_file = not source.strip().isdigit()
+        self._is_file = _source_is_file(source)
         self._reopen = False
 
     # ── lifecycle ────────────────────────────────────────────
@@ -40,6 +48,8 @@ class Camera:
         self._stop.set()
         if self._thread:
             self._thread.join(timeout=3)
+            if self._thread.is_alive():
+                return  # 스레드가 아직 read() 중 — 다른 스레드에서 release()하면 크래시 위험
         if self._cap is not None:
             self._cap.release()
 
@@ -52,7 +62,7 @@ class Camera:
         if source == self.source:
             return
         self.source = source
-        self._is_file = not source.strip().isdigit()
+        self._is_file = _source_is_file(source)
         self._reopen = True
 
     # ── consumers ────────────────────────────────────────────

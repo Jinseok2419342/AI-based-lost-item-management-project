@@ -39,6 +39,7 @@ class Track:
     item_id: int
     bbox: tuple[int, int, int, int]     # (x, y, w, h)
     patch: np.ndarray                   # 등록 시점의 그레이스케일 크롭
+    recheck: bool = False               # 가림 발생 후 존재 재확인 필요
 
     def as_dict(self) -> dict:
         x, y, w, h = self.bbox
@@ -65,6 +66,8 @@ class SceneWatcher:
         self._ref_raw: np.ndarray | None = None  # 기준 장면(그레이, 원본) — 엣지·패치용
         self._prev: np.ndarray | None = None     # 직전 프레임(움직임 계산용)
         self._settle_start = 0.0
+        self._motion_start = 0.0
+        self._rebaseline_req = threading.Event()
         self._last_seq = -1
         self._frame_size: tuple[int, int] = (0, 0)   # (w, h)
         self._stop = threading.Event()
@@ -96,11 +99,12 @@ class SceneWatcher:
         }
 
     def rebaseline(self) -> None:
-        """현재 화면을 새 기준으로 삼는다(감지 초기화, 트랙은 유지)."""
-        self._ref = None
-        self._ref_raw = None
-        self._prev = None
-        self.state = "idle"
+        """현재 화면을 새 기준으로 삼도록 요청한다(감지 초기화, 트랙은 유지).
+
+        실제 초기화는 감지 스레드가 다음 스텝에서 수행한다 — 다른 스레드가
+        _ref/_prev를 직접 건드리면 분석 도중 끼어들어 등록이 누락될 수 있다.
+        """
+        self._rebaseline_req.set()
 
     def add_track(self, item_id: int, bbox, patch: np.ndarray) -> None:
         with self._tracks_lock:
@@ -136,6 +140,13 @@ class SceneWatcher:
         h, w = frame.shape[:2]
         self._frame_size = (w, h)
 
+        if self._rebaseline_req.is_set():
+            self._rebaseline_req.clear()
+            self._ref = None
+            self._ref_raw = None
+            self._prev = None
+            self.state = "idle"
+
         raw = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(raw, BLUR, 0)
 
@@ -160,13 +171,15 @@ class SceneWatcher:
             self._ref_raw = raw
             return
 
-        motion_threshold = config.get_float("motion_threshold")
+        # 설정 이상값(0·음수 등)으로 상태머신이 교착하지 않도록 안전 범위로 클램프
+        motion_threshold = min(max(config.get_float("motion_threshold"), 0.0005), 0.5)
         stable_threshold = motion_threshold / 3.0
-        settle_seconds = config.get_float("settle_seconds")
+        settle_seconds = min(max(config.get_float("settle_seconds"), 0.5), 60.0)
 
         if self.state == "idle":
             if motion_ratio > motion_threshold:
                 self.state = "motion"
+                self._motion_start = time.monotonic()
                 self._emit("motion", "움직임이 감지되었습니다.")
             else:
                 # 서서히 변하는 조명을 흡수 (정지 상태에서만, 아주 천천히)
@@ -175,6 +188,16 @@ class SceneWatcher:
             if motion_ratio < stable_threshold:
                 self.state = "settling"
                 self._settle_start = time.monotonic()
+            elif time.monotonic() - self._motion_start > 90.0:
+                # 선풍기·화면 깜빡임 등 끝나지 않는 미세 움직임 → 등록 없이 기준만 갱신
+                self._ref = gray.astype(np.float32)
+                self._ref_raw = raw
+                self.state = "idle"
+                self._emit(
+                    "rebaseline",
+                    "움직임이 90초 이상 계속되어 물건 등록 없이 기준 화면을 갱신했습니다. "
+                    "(민감도 설정을 확인하세요)",
+                )
         elif self.state == "settling":
             if motion_ratio > stable_threshold:
                 self.state = "motion"
@@ -208,21 +231,41 @@ class SceneWatcher:
                 f"화면의 {change_ratio:.0%}가 변해 조명 변화/카메라 이동으로 판단, 기준 화면을 갱신했습니다.",
             )
             return
-        if change_ratio == 0:
+
+        with self._tracks_lock:
+            tracks = list(self._tracks)
+        # 변화가 전혀 없어도, 가림 후 재확인이 필요한 트랙이 있으면 검사는 진행한다
+        if change_ratio == 0 and not any(t.recheck for t in tracks):
             return
+
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        all_change_boxes = [cv2.boundingRect(c) for c in contours]
 
         # 1) 기존 물체가 아직 있는지 확인 → 없어졌으면 회수 처리
         removed_boxes: list[tuple[int, int, int, int]] = []
-        with self._tracks_lock:
-            tracks = list(self._tracks)
         for track in tracks:
             x, y, tw, th = self._clamp_box(track.bbox, w, h)
             if tw <= 0 or th <= 0:
                 continue
             region = mask[y : y + th, x : x + tw]
-            if region.size == 0 or float(region.sum()) / (255.0 * region.size) < REMOVAL_MASK_RATIO:
+            changed = (
+                region.size > 0
+                and float(region.sum()) / (255.0 * region.size) >= REMOVAL_MASK_RATIO
+            )
+            if not changed and not track.recheck:
                 continue  # 그 자리 변화 없음 → 그대로 있음
+            # 물체보다 훨씬 큰 변화 영역이 덮고 있으면 사람/큰 물체에 가려진 것 →
+            # 회수로 판단하지 않고, 가림이 걷힌 뒤의 분석에서 존재를 재확인한다
+            track_area = max(1, tw * th)
+            occluded = any(
+                _intersects(b, (x, y, tw, th)) and b[2] * b[3] > 3 * track_area
+                for b in all_change_boxes
+            )
+            if occluded:
+                track.recheck = True
+                continue
             score = self._match_score(cur_raw, track, w, h)
+            track.recheck = False
             if score < config.get_float("match_threshold"):
                 removed_boxes.append(track.bbox)
                 self.remove_track(track.item_id)
@@ -230,7 +273,6 @@ class SceneWatcher:
                     self.cb.on_object_removed(track.item_id)
 
         # 2) 새로 나타난 물체 등록
-        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         min_area = config.get_float("min_area_ratio") * w * h
         boxes = [
             cv2.boundingRect(c) for c in contours if cv2.contourArea(c) >= min_area
