@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>분실물 관리</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- ── 사이드바 ─────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 L21 21"/></svg>
+      </div>
+      <div>
+        <div class="brand-title">분실물 관리</div>
+        <div class="brand-sub">AI Lost &amp; Found</div>
+      </div>
+    </div>
+    <nav class="sidebar-nav">
+      <button class="nav-item active" data-page="dashboard">
+        <svg viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5"/></svg>
+        대시보드
+      </button>
+      <button class="nav-item" data-page="items">
+        <svg viewBox="0 0 24 24"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4z"/><path d="M4 7l8 4 8-4"/><path d="M12 11v10"/></svg>
+        분실물<span class="nav-badge" id="navItemCount"></span>
+      </button>
+      <button class="nav-item" data-page="events">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg>
+        이벤트 로그
+      </button>
+      <button class="nav-item" data-page="settings">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2-1.2L14.2 3h-4l-.4 2.5a7 7 0 0 0-2 1.2l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .8.1 1.2l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2 1.2l.4 2.5h4l.4-2.5a7 7 0 0 0 2-1.2l2.3 1 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></svg>
+        설정
+      </button>
+    </nav>
+    <div class="sidebar-footer">
+      <div class="system-pill" id="systemPill">
+        <span class="dot" id="systemDot"></span><span id="systemLabel">연결 중…</span>
+      </div>
+      <button class="theme-toggle" id="themeToggle" title="다크 모드 전환">
+        <svg viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4 8 8 0 1 0 20 14.5z"/></svg>
+      </button>
+    </div>
+  </aside>
+
+  <!-- ── 본문 ────────────────────────────────────── -->
+  <main class="content">
+
+    <!-- 대시보드 -->
+    <section class="page active" id="page-dashboard">
+      <header class="page-header">
+        <h1>대시보드</h1>
+        <p class="page-caption" id="dashCaption">실시간 감시 현황</p>
+      </header>
+
+      <div class="stat-row" id="statRow">
+        <div class="stat-card">
+          <div class="stat-icon tint-blue"><svg viewBox="0 0 24 24"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4z"/><path d="M4 7l8 4 8-4"/><path d="M12 11v10"/></svg></div>
+          <div class="stat-body"><div class="stat-value" id="statStored">–</div><div class="stat-label">보관 중</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon tint-indigo"><svg viewBox="0 0 24 24"><path d="M12 8v4l2.5 2.5"/><circle cx="12" cy="12" r="9"/></svg></div>
+          <div class="stat-body"><div class="stat-value" id="statToday">–</div><div class="stat-label">오늘 등록</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon tint-orange"><svg viewBox="0 0 24 24"><path d="M12 9v5"/><path d="M12 17.5v.1"/><path d="M10.3 4 2.8 17a2 2 0 0 0 1.7 3h15a2 2 0 0 0 1.7-3L13.7 4a2 2 0 0 0-3.4 0z"/></svg></div>
+          <div class="stat-body"><div class="stat-value" id="statExpired">–</div><div class="stat-label">폐기 대상</div></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon tint-green"><svg viewBox="0 0 24 24"><path d="M5 12.5 10 17.5 19 7"/></svg></div>
+          <div class="stat-body"><div class="stat-value" id="statRetrieved">–</div><div class="stat-label">회수 완료</div></div>
+        </div>
+      </div>
+
+      <div class="dash-grid">
+        <div class="card live-card">
+          <div class="card-header">
+            <h2>실시간 카메라</h2>
+            <div class="live-controls">
+              <span class="state-pill" id="statePill">연결 중…</span>
+              <button class="btn btn-small" id="btnPause">일시정지</button>
+              <button class="btn btn-small" id="btnRebaseline" title="현재 화면을 감지 기준으로 재설정">기준 초기화</button>
+            </div>
+          </div>
+          <div class="live-wrap" id="liveWrap">
+            <img id="liveStream" src="/api/stream" alt="실시간 카메라">
+            <div class="live-overlay" id="liveOverlay"></div>
+          </div>
+        </div>
+
+        <div class="card recent-card">
+          <div class="card-header">
+            <h2>최근 등록</h2>
+            <button class="btn btn-plain" data-goto="items">전체 보기 ›</button>
+          </div>
+          <div class="recent-list" id="recentList">
+            <div class="empty-note">아직 등록된 분실물이 없습니다.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 분실물 목록 -->
+    <section class="page" id="page-items">
+      <header class="page-header">
+        <h1>분실물</h1>
+        <p class="page-caption" id="itemsCaption">전체 물품 목록</p>
+      </header>
+
+      <div class="toolbar">
+        <div class="segmented" id="statusSeg">
+          <button class="seg-btn active" data-status="">전체</button>
+          <button class="seg-btn" data-status="stored">보관 중</button>
+          <button class="seg-btn" data-status="retrieved">회수됨</button>
+          <button class="seg-btn" data-status="disposed">폐기됨</button>
+        </div>
+        <div class="chip-row" id="catChips">
+          <button class="chip active" data-cat="">전체 분류</button>
+          <button class="chip" data-cat="valuable">귀중품</button>
+          <button class="chip" data-cat="general">일반 물품</button>
+          <button class="chip" data-cat="food">음식</button>
+        </div>
+        <div class="toolbar-right">
+          <div class="search-field">
+            <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5 21 21"/></svg>
+            <input type="search" id="searchInput" placeholder="검색">
+          </div>
+          <label class="btn btn-secondary" for="manualPhoto">사진으로 등록</label>
+          <input type="file" id="manualPhoto" accept="image/*" hidden>
+        </div>
+      </div>
+
+      <div class="item-grid" id="itemGrid"></div>
+      <div class="empty-state" id="itemsEmpty" hidden>
+        <svg viewBox="0 0 24 24"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4z"/><path d="M4 7l8 4 8-4"/><path d="M12 11v10"/></svg>
+        <h3>표시할 분실물이 없습니다</h3>
+        <p>카메라 앞에 물건이 놓이면 자동으로 등록됩니다.</p>
+      </div>
+    </section>
+
+    <!-- 이벤트 로그 -->
+    <section class="page" id="page-events">
+      <header class="page-header">
+        <h1>이벤트 로그</h1>
+        <p class="page-caption">감지·알림·조작 이력</p>
+      </header>
+      <div class="card">
+        <div class="event-list" id="eventList">
+          <div class="empty-note">이벤트가 없습니다.</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 설정 -->
+    <section class="page" id="page-settings">
+      <header class="page-header">
+        <h1>설정</h1>
+        <p class="page-caption">변경 후 아래 저장 버튼을 눌러 주세요.</p>
+      </header>
+
+      <div class="settings-stack">
+        <div class="card settings-group">
+          <h2 class="group-title">AI 식별</h2>
+          <div class="form-row">
+            <label>AI 공급자</label>
+            <select id="s_ai_provider">
+              <option value="auto">자동 (키가 있는 것 사용)</option>
+              <option value="openai">OpenAI (GPT)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="mock">Mock (키 없이 시연)</option>
+            </select>
+          </div>
+          <div class="form-row"><label>OpenAI API 키</label><input type="password" id="s_openai_api_key" placeholder="sk-..." autocomplete="off"></div>
+          <div class="form-row"><label>Gemini API 키</label><input type="password" id="s_gemini_api_key" placeholder="AIza..." autocomplete="off"></div>
+          <p class="group-note">현재 사용 중: <strong id="aiProviderNow">–</strong>. 키가 없으면 mock 모드로 동작하며 물품명이 '미확인 물품'으로 등록됩니다.</p>
+        </div>
+
+        <div class="card settings-group">
+          <h2 class="group-title">보관 기간</h2>
+          <div class="form-row"><label>귀중품 (일)</label><input type="number" id="s_days_valuable" min="1"></div>
+          <div class="form-row"><label>일반 물품 (일)</label><input type="number" id="s_days_general" min="1"></div>
+          <div class="form-row"><label>음식 (일)</label><input type="number" id="s_days_food" min="1"></div>
+          <div class="form-row"><label>사전 알림 (일 전)</label><input type="number" id="s_warn_before_days" min="0"></div>
+        </div>
+
+        <div class="card settings-group">
+          <h2 class="group-title">이메일 알림</h2>
+          <div class="form-row">
+            <label>알림 사용</label>
+            <label class="switch"><input type="checkbox" id="s_email_enabled"><span class="slider"></span></label>
+          </div>
+          <div class="form-row"><label>관리자 이메일</label><input type="email" id="s_admin_email" placeholder="admin@example.com"></div>
+          <div class="form-row"><label>SMTP 호스트</label><input type="text" id="s_smtp_host" placeholder="smtp.gmail.com"></div>
+          <div class="form-row"><label>SMTP 포트</label><input type="number" id="s_smtp_port" placeholder="587"></div>
+          <div class="form-row"><label>SMTP 계정</label><input type="text" id="s_smtp_user" placeholder="me@gmail.com" autocomplete="off"></div>
+          <div class="form-row"><label>SMTP 비밀번호</label><input type="password" id="s_smtp_password" placeholder="Gmail 앱 비밀번호 16자리" autocomplete="off"></div>
+          <div class="form-row">
+            <label>테스트</label>
+            <button class="btn btn-secondary" id="btnTestEmail">테스트 메일 발송</button>
+          </div>
+          <p class="group-note">Gmail은 <strong>앱 비밀번호</strong>가 필요합니다. Google 계정 → 보안 → 2단계 인증 → 앱 비밀번호에서 발급하세요.</p>
+        </div>
+
+        <div class="card settings-group">
+          <h2 class="group-title">카메라 · 감지</h2>
+          <div class="form-row"><label>카메라 소스</label><input type="text" id="s_camera_source" placeholder="0 (웹캠 번호) 또는 동영상 파일 경로"></div>
+          <div class="form-row"><label>안정화 대기 (초)</label><input type="number" id="s_settle_seconds" min="1" step="0.5"></div>
+          <div class="form-row"><label>움직임 민감도</label><input type="number" id="s_motion_threshold" min="0.001" max="0.5" step="0.005"></div>
+          <div class="form-row"><label>최소 물체 크기 비율</label><input type="number" id="s_min_area_ratio" min="0.0005" max="0.1" step="0.001"></div>
+          <div class="form-row"><label>존재 판정 점수</label><input type="number" id="s_match_threshold" min="0.1" max="0.95" step="0.05"></div>
+          <div class="form-row"><label>전체 변화 상한</label><input type="number" id="s_max_change_ratio" min="0.1" max="0.9" step="0.05"></div>
+          <p class="group-note">움직임 민감도는 낮을수록 민감합니다. 오탐이 많으면 값을 올리세요.</p>
+        </div>
+
+        <div class="card settings-group">
+          <h2 class="group-title">시스템</h2>
+          <div class="form-row">
+            <label>폐기 검사</label>
+            <button class="btn btn-secondary" id="btnRunScheduler">지금 검사 실행</button>
+          </div>
+          <p class="group-note" id="schedulerNote">1분마다 자동으로 폐기 기한을 검사합니다.</p>
+        </div>
+
+        <div class="settings-save">
+          <button class="btn btn-primary btn-large" id="btnSaveSettings">설정 저장</button>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- ── 물품 상세 모달 ───────────────────────────── -->
+<div class="modal-backdrop" id="modalBackdrop" hidden>
+  <div class="modal" role="dialog" aria-modal="true">
+    <div class="modal-head">
+      <h2 id="modalTitle">물품 상세</h2>
+      <button class="modal-close" id="modalClose" aria-label="닫기">
+        <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-photo"><img id="modalPhoto" alt="물품 사진"></div>
+      <div class="modal-fields">
+        <div class="form-row"><label>물품명</label><input type="text" id="m_name"></div>
+        <div class="form-row">
+          <label>분류</label>
+          <div class="segmented seg-compact" id="m_category">
+            <button class="seg-btn" data-val="valuable">귀중품</button>
+            <button class="seg-btn" data-val="general">일반</button>
+            <button class="seg-btn" data-val="food">음식</button>
+          </div>
+        </div>
+        <div class="form-row"><label>폐기 기한</label><input type="date" id="m_deadline"></div>
+        <div class="form-row"><label>설명</label><textarea id="m_description" rows="2"></textarea></div>
+        <div class="meta-list" id="m_meta"></div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <div class="action-left">
+        <button class="btn btn-destructive" id="m_delete">삭제</button>
+      </div>
+      <div class="action-right">
+        <button class="btn btn-secondary" id="m_reclassify">AI 재분석</button>
+        <button class="btn btn-secondary" id="m_status_toggle">회수 처리</button>
+        <button class="btn btn-secondary" id="m_dispose">폐기 처리</button>
+        <button class="btn btn-primary" id="m_save">저장</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-region" id="toastRegion"></div>
+<script src="/static/js/app.js"></script>
+</body>
+</html>
