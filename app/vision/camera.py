@@ -80,6 +80,9 @@ class Camera:
     def _release(self) -> None:
         cap, self._cap = self._cap, None
         self._connected = False
+        with self._lock:
+            # 이전 소스의 마지막 프레임이 소스 전환 직후 '라이브'처럼 보이지 않게 비운다
+            self._frame = None
         if cap is not None:
             try:
                 cap.release()

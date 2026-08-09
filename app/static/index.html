@@ -6,7 +6,7 @@
 <title>분실물 관리</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔍</text></svg>">
 <!-- Pretendard: 온라인이면 로드되어 Windows에서도 애플 수준 타이포그래피, 오프라인이면 시스템 폰트로 폴백 -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" crossorigin="anonymous">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" crossorigin="anonymous" media="print" onload="this.media='all'">
 <link rel="stylesheet" href="/static/css/app.css">
 </head>
 <body>
@@ -141,8 +141,8 @@
       <div class="item-grid" id="itemGrid"></div>
       <div class="empty-state" id="itemsEmpty" hidden>
         <svg viewBox="0 0 24 24"><path d="M12 3 4 7v10l8 4 8-4V7l-8-4z"/><path d="M4 7l8 4 8-4"/><path d="M12 11v10"/></svg>
-        <h3>표시할 분실물이 없습니다</h3>
-        <p>카메라 앞에 물건이 놓이면 자동으로 등록됩니다.</p>
+        <h3 id="itemsEmptyTitle">표시할 분실물이 없습니다</h3>
+        <p id="itemsEmptyHint">카메라 앞에 물건이 놓이면 자동으로 등록됩니다.</p>
       </div>
     </section>
 

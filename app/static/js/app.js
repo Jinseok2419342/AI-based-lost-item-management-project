@@ -114,6 +114,22 @@ $$("[data-goto]").forEach((b) => b.addEventListener("click", () => goto(b.datase
 
 /* ── 상태 폴링 ────────────────────────────────────── */
 let serverDown = false;
+let settleAnchor = null; // { remaining, at } — 안정화 카운트다운 보간용
+
+function renderStatePill() {
+  const s = state.status;
+  if (!s) return;
+  const pill = $("#statePill");
+  const key = s.paused ? "paused" : s.state;
+  let label = STATE_KO[key] || key;
+  if (key === "settling" && settleAnchor) {
+    const left = settleAnchor.remaining - (performance.now() - settleAnchor.at) / 1000;
+    label = `${label} · ${Math.max(1, Math.ceil(left))}초`;
+  }
+  if (pill.textContent !== label) pill.textContent = label;
+  pill.className = `state-pill ${key}`;
+}
+setInterval(renderStatePill, 250);
 function reloadStream() {
   $("#liveStream").src = `/api/stream?t=${Date.now()}`;
 }
@@ -127,14 +143,12 @@ async function pollStatus() {
       reloadStream(); // 서버가 살아나면 멈춘 MJPEG 스트림 재연결
     }
     state.status = s;
-    const pill = $("#statePill");
-    const key = s.paused ? "paused" : s.state;
-    let pillLabel = STATE_KO[key] || key;
-    if (key === "settling" && s.settle_remaining != null) {
-      pillLabel = `${pillLabel} · ${Math.max(1, Math.ceil(s.settle_remaining))}초`;
-    }
-    if (pill.textContent !== pillLabel) pill.textContent = pillLabel;
-    pill.className = `state-pill ${key}`;
+    // 카운트다운은 서버 값(1.5초 폴링)을 앵커로 삼아 로컬에서 보간 → 3·2·1이 건너뛰지 않음
+    settleAnchor =
+      !s.paused && s.state === "settling" && s.settle_remaining != null
+        ? { remaining: s.settle_remaining, at: performance.now() }
+        : null;
+    renderStatePill();
     $("#btnPause").textContent = s.paused ? "감지 재개" : "일시정지";
     $("#btnPause").classList.toggle("on", s.paused);
 
@@ -161,8 +175,8 @@ async function pollStatus() {
 function renderOverlay(s) {
   const overlay = $("#liveOverlay");
   const img = $("#liveStream");
-  if (!s.frame_width || !s.frame_height || !img.clientWidth) {
-    overlay.innerHTML = "";
+  if (!s.camera_connected || !s.frame_width || !s.frame_height || !img.clientWidth) {
+    overlay.innerHTML = ""; // 카메라 없음 화면 위에 어긋난 박스를 남기지 않는다
     return;
   }
   // object-fit: contain 보정 — 실제 표시되는 영상 사각형 계산
@@ -262,6 +276,8 @@ function renderRecent() {
 }
 
 /* ── 물품 목록 ────────────────────────────────────── */
+const seenCardIds = new Set(); // 등장 애니메이션을 이미 재생한 카드
+
 async function refreshItems() {
   await pollItemsCache(true);
 }
@@ -278,11 +294,21 @@ function renderItems() {
   }
   $("#itemsCaption").textContent = `${list.length}개 물품`;
   $("#itemsEmpty").hidden = list.length > 0;
+  if (!list.length) {
+    const filtered = !!(state.filterStatus || state.filterCat || state.search);
+    $("#itemsEmptyTitle").textContent = filtered
+      ? "조건에 맞는 물품이 없습니다"
+      : "표시할 분실물이 없습니다";
+    $("#itemsEmptyHint").textContent = filtered
+      ? "필터나 검색어를 변경해 보세요."
+      : "카메라 앞에 물건이 놓이면 자동으로 등록됩니다.";
+  }
   $("#itemGrid").innerHTML = list
     .map((i) => {
       const pending = i.ai_status === "pending";
+      // 한 번 화면에 나온 카드는 등장 애니메이션을 재생하지 않는다 (재렌더 시 전체 점멸 방지)
       return `
-    <div class="item-card" data-id="${i.id}">
+    <div class="item-card${seenCardIds.has(i.id) ? " no-anim" : ""}" data-id="${i.id}">
       ${i.photo_path ? `<img class="item-photo" src="/api/items/${i.id}/photo" alt="${esc(i.name)}" loading="lazy">` : PLACEHOLDER_SVG}
       <div class="item-body">
         <div class="item-name">${pending ? `<span class="pending">분석 중…</span>` : esc(i.name)}</div>
@@ -296,6 +322,7 @@ function renderItems() {
     </div>`;
     })
     .join("");
+  list.forEach((i) => seenCardIds.add(i.id));
   $("#itemGrid").querySelectorAll(".item-card").forEach((el) =>
     el.addEventListener("click", () => openModal(+el.dataset.id))
   );
@@ -508,7 +535,14 @@ async function refreshEvents() {
   try {
     const data = await api("/api/events");
     const sig = data.events.length ? `${data.events[0].id}:${data.events.length}` : "0";
-    if (sig === eventsSig) return;
+    if (sig === eventsSig) {
+      // 내용 변화 없음 — 상대 시각만 갱신 (전체 재렌더는 등장 애니메이션이 전 행에 재생됨)
+      $("#eventList").querySelectorAll(".event-time[data-ts]").forEach((el) => {
+        const t = relTime(el.dataset.ts);
+        if (el.textContent !== t) el.textContent = t;
+      });
+      return;
+    }
     eventsSig = sig;
     const list = $("#eventList");
     if (!data.events.length) {
@@ -523,7 +557,7 @@ async function refreshEvents() {
         <div class="event-ico ${cls}"><svg viewBox="0 0 24 24">${path}</svg></div>
         <div>
           <div class="event-msg">${esc(ev.message)}</div>
-          <div class="event-time">${relTime(ev.created_at)}</div>
+          <div class="event-time" data-ts="${esc(ev.created_at)}">${relTime(ev.created_at)}</div>
         </div>
       </div>`;
       })
