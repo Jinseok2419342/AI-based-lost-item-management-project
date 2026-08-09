@@ -89,12 +89,19 @@ class SceneWatcher:
         w, h = self._frame_size
         with self._tracks_lock:
             tracks = [t.as_dict() for t in self._tracks]
+        settle_remaining = None
+        if self.state == "settling":
+            settle_seconds = min(max(config.get_float("settle_seconds"), 0.5), 60.0)
+            settle_remaining = max(
+                0.0, round(settle_seconds - (time.monotonic() - self._settle_start), 1)
+            )
         return {
             "state": "no_camera" if not self.camera.connected else self.state,
             "camera_connected": self.camera.connected,
             "paused": self.paused,
             "frame_width": w,
             "frame_height": h,
+            "settle_remaining": settle_remaining,
             "tracks": tracks,
         }
 

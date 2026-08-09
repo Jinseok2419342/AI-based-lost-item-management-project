@@ -102,7 +102,10 @@ function goto(page) {
   state.page = page;
   $$(".nav-item").forEach((b) => b.classList.toggle("active", b.dataset.page === page));
   $$(".page").forEach((p) => p.classList.toggle("active", p.id === `page-${page}`));
-  if (page === "items") refreshItems();
+  if (page === "items") {
+    renderItems(); // 캐시로 즉시 표시하고, 최신 데이터는 백그라운드로 갱신
+    pollItemsCache();
+  }
   if (page === "events") refreshEvents();
   if (page === "settings") loadSettings();
 }
@@ -126,7 +129,11 @@ async function pollStatus() {
     state.status = s;
     const pill = $("#statePill");
     const key = s.paused ? "paused" : s.state;
-    pill.textContent = STATE_KO[key] || key;
+    let pillLabel = STATE_KO[key] || key;
+    if (key === "settling" && s.settle_remaining != null) {
+      pillLabel = `${pillLabel} · ${Math.max(1, Math.ceil(s.settle_remaining))}초`;
+    }
+    if (pill.textContent !== pillLabel) pill.textContent = pillLabel;
     pill.className = `state-pill ${key}`;
     $("#btnPause").textContent = s.paused ? "감지 재개" : "일시정지";
     $("#btnPause").classList.toggle("on", s.paused);
@@ -164,14 +171,32 @@ function renderOverlay(s) {
   const drawW = s.frame_width * scale, drawH = s.frame_height * scale;
   const offX = (boxW - drawW) / 2, offY = (boxH - drawH) / 2;
 
-  const boxes = (s.tracks || []).map((t) => {
+  // 기존 박스를 재사용해 위치만 갱신 — CSS transition이 부드럽게 이동시킨다
+  const seen = new Set();
+  for (const t of s.tracks || []) {
+    const tid = String(t.item_id);
+    seen.add(tid);
+    let el = overlay.querySelector(`[data-tid="${tid}"]`);
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "track-box";
+      el.dataset.tid = tid;
+      el.innerHTML = `<span class="track-tag"></span>`;
+      overlay.appendChild(el);
+    }
     const [x, y, w, h] = t.bbox;
+    el.style.left = `${offX + x * scale}px`;
+    el.style.top = `${offY + y * scale}px`;
+    el.style.width = `${w * scale}px`;
+    el.style.height = `${h * scale}px`;
     const item = state.itemsById.get(t.item_id);
     const name = item && item.ai_status !== "pending" ? item.name : `#${t.item_id} 분석 중`;
-    return `<div class="track-box" style="left:${offX + x * scale}px;top:${offY + y * scale}px;width:${w * scale}px;height:${h * scale}px;">
-      <span class="track-tag">${esc(name)}</span></div>`;
-  });
-  overlay.innerHTML = boxes.join("");
+    const tag = el.firstElementChild;
+    if (tag.textContent !== name) tag.textContent = name;
+  }
+  for (const el of [...overlay.children]) {
+    if (!seen.has(el.dataset.tid)) el.remove();
+  }
 }
 
 /* ── 통계/최근 ────────────────────────────────────── */
@@ -188,13 +213,26 @@ async function pollStats() {
   } catch {}
 }
 
-async function pollItemsCache() {
+/* 목록은 내용이 실제로 바뀔 때만 다시 그린다 — 매 폴링마다 innerHTML을 갈아끼우면
+   사진이 깜빡여 화면이 지저분해진다. 상대 시각("n분 전") 갱신용으로 60초마다는 강제 렌더. */
+let itemsSig = "";
+let lastListRender = 0;
+
+async function pollItemsCache(force = false) {
   try {
     const data = await api("/api/items");
     state.items = data.items;
     state.itemsById = new Map(data.items.map((i) => [i.id, i]));
-    renderRecent();
-    if (state.page === "items") renderItems();
+    const sig = JSON.stringify(
+      data.items.map((i) => [i.id, i.status, i.name, i.category, i.deadline, i.ai_status, !!i.photo_path])
+    );
+    const changed = sig !== itemsSig;
+    itemsSig = sig;
+    if (force || changed || Date.now() - lastListRender > 60000) {
+      lastListRender = Date.now();
+      renderRecent();
+      if (state.page === "items") renderItems();
+    }
   } catch {}
 }
 
@@ -225,8 +263,7 @@ function renderRecent() {
 
 /* ── 물품 목록 ────────────────────────────────────── */
 async function refreshItems() {
-  await pollItemsCache();
-  renderItems();
+  await pollItemsCache(true);
 }
 
 function renderItems() {
@@ -466,9 +503,13 @@ const EVENT_ICON = {
   item_ignored: ["warn", `<circle cx="12" cy="12" r="9"/><path d="M6 6l12 12"/>`],
   item_deleted: ["err", `<path d="M5 7h14M9 7V5h6v2M7 7l1 13h8l1-13"/>`],
 };
+let eventsSig = "";
 async function refreshEvents() {
   try {
     const data = await api("/api/events");
+    const sig = data.events.length ? `${data.events[0].id}:${data.events.length}` : "0";
+    if (sig === eventsSig) return;
+    eventsSig = sig;
     const list = $("#eventList");
     if (!data.events.length) {
       list.innerHTML = `<div class="empty-note">이벤트가 없습니다.</div>`;
@@ -555,10 +596,10 @@ $("#btnRunScheduler").addEventListener("click", async () => {
 /* ── 루프 시작 ────────────────────────────────────── */
 pollStatus();
 pollStats();
-pollItemsCache();
-setInterval(pollStatus, 2000);
-setInterval(pollStats, 5000);
+pollItemsCache(true);
+setInterval(pollStatus, 1500);
+setInterval(pollStats, 4000);
 setInterval(() => {
   pollItemsCache();
   if (state.page === "events") refreshEvents();
-}, 5000);
+}, 3000);

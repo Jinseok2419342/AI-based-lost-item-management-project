@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -165,23 +166,34 @@ def create_router(
         return s
 
     # ── camera ───────────────────────────────────────────────
+    # 여러 브라우저가 동시에 봐도 프레임당 한 번만 JPEG 인코딩하도록 공유 캐시
+    enc_cache = {"seq": -1, "data": b""}
+    enc_lock = threading.Lock()
+
+    def _encode_latest() -> bytes:
+        frame, seq = camera.latest()
+        if frame is None or not camera.connected:
+            return b""
+        with enc_lock:
+            if seq == enc_cache["seq"]:
+                return enc_cache["data"]
+            ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
+            if not ok:
+                return b""
+            enc_cache["seq"] = seq
+            enc_cache["data"] = jpeg.tobytes()
+            return enc_cache["data"]
+
     @r.get("/stream")
     async def stream():
         boundary = b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
 
-        def encode() -> bytes:
-            frame, _ = camera.latest()
-            if frame is None or not camera.connected:
-                return b""
-            ok, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            return jpeg.tobytes() if ok else b""
-
         async def gen():
             no_cam = _no_camera_jpeg()
             while True:
-                data = await asyncio.to_thread(encode)  # 인코딩이 이벤트 루프를 막지 않게
+                data = await asyncio.to_thread(_encode_latest)  # 인코딩이 이벤트 루프를 막지 않게
                 yield boundary + (data or no_cam) + b"\r\n"
-                await asyncio.sleep(0.12)
+                await asyncio.sleep(0.07)  # ~14fps
 
         return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 

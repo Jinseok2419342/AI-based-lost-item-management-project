@@ -92,6 +92,9 @@ class Camera:
         if not cap.isOpened():
             cap.release()
             return False
+        if not self._is_file:
+            # 웹캠 내부 버퍼를 줄여 화면 지연 최소화 (미지원 백엔드에선 무시됨)
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
         self._cap = cap
         self._connected = True
         log.info("카메라 연결됨: %s", src)
